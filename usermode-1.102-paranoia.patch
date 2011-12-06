@@ -1,0 +1,94 @@
+# HG changeset patch
+# User Miloslav Trmač <mitr@redhat.com>
+# Date 1265320817 -3600
+# Node ID 8a897830e2d8745a72eb4236f02a981cfdc95528
+# Parent  0dcd3edc6d56d65d8f02b31a9c807b1c152232c5
+Be more paranoid about manipulating user/group IDs.
+
+2010-02-04  Miloslav Trmač  <mitr@redhat.com>
+
+	* userhelper.c (become_super): Check for failures of the system
+	calls in addition to verifying the expected results.
+	(become_normal): Check for failures of the system
+	calls in addition to verifying the expected results.  Call setregid()
+	as well.  Verify the real gid/uid values.
+
+diff -r 0dcd3edc6d56 -r 8a897830e2d8 ChangeLog
+--- a/ChangeLog	Sun Dec 06 17:02:50 2009 +0000
++++ b/ChangeLog	Thu Feb 04 23:00:17 2010 +0100
+@@ -1,3 +1,11 @@
++2010-02-04  Miloslav Trmač  <mitr@redhat.com>
++
++	* userhelper.c (become_super): Check for failures of the system
++	calls in addition to verifying the expected results.
++	(become_normal): Check for failures of the system
++	calls in addition to verifying the expected results.  Call setregid()
++	as well.  Verify the real gid/uid values.
++
+ 2009-10-05  Miloslav Trmač  <mitr@redhat.com>
+ 
+ 	* configure.ac: Release 1.102.
+diff -r 0dcd3edc6d56 -r 8a897830e2d8 userhelper.c
+--- a/userhelper.c	Sun Dec 06 17:02:50 2009 +0000
++++ b/userhelper.c	Thu Feb 04 23:00:17 2010 +0100
+@@ -985,17 +985,20 @@
+ static void
+ become_super(void)
+ {
+-	/* Become the superuser. */
+-	setgroups(0, NULL);
+-	setregid(0, 0);
+-	setreuid(0, 0);
+-	/* Yes, setuid() and friends can fail, even for superusers. */
++	/* Become the superuser.
++	   Yes, setuid() and friends can fail, even for superusers. */
++	if (setgroups(0, NULL) != 0 ||
++	    setregid(0, 0) != 0 ||
++	    setreuid(0, 0) != 0) {
++		debug_msg("userhelper: set*id() failure: %s\n",
++			  strerror(errno));
++		exit(ERR_EXEC_FAILED);
++	}
+ 	if ((geteuid() != 0) ||
+ 	    (getuid() != 0) ||
+ 	    (getegid() != 0) ||
+ 	    (getgid() != 0)) {
+-		debug_msg("userhelper: set*id() failure: %s\n",
+-			  strerror(errno));
++		debug_msg("userhelper: set*id() didn't work\n");
+ 		exit(ERR_EXEC_FAILED);
+ 	}
+ }
+@@ -1003,17 +1006,26 @@
+ static void
+ become_normal(const char *user)
+ {
+-	/* Join the groups of the user who invoked us. */
+-	initgroups(user, getgid());
++	gid_t gid;
++	uid_t uid;
++
++	gid = getgid();
++	uid = getuid();
++	/* Become the user who invoked us. */
++	if (initgroups(user, gid) != 0 ||
++	    setregid(gid, gid) != 0 ||
++	    setreuid(uid, uid) != 0) {
++		debug_msg("userhelper: set*id() failure: %s\n",
++			  strerror(errno));
++		exit(ERR_EXEC_FAILED);
++	}
+ 	/* Verify that we're back to normal. */
+-	if (getegid() != getgid()) {
++	if (getegid() != gid || getgid() != gid) {
+ 		debug_msg("userhelper: still setgid()\n");
+ 		exit(ERR_EXEC_FAILED);
+ 	}
+-	/* Become the user who invoked us. */
+-	setreuid(getuid(), getuid());
+ 	/* Yes, setuid() can fail. */
+-	if (geteuid() != getuid()) {
++	if (geteuid() != uid || getuid() != uid) {
+ 		debug_msg("userhelper: still setuid()\n");
+ 		exit(ERR_EXEC_FAILED);
+ 	}

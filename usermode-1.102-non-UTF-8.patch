@@ -1,0 +1,69 @@
+tree 06cf2d5b48ef
+parent b542b3be959d
+author Miloslav Trmač <mitr@redhat.com> 1267096785 -3600
+committer Miloslav Trmač <mitr@redhat.com> 1267096785 -3600
+revision 1471
+branch default
+
+Fix prompts in non-UTF-8 locales (e.g. eu_ES@euro)
+
+2010-02-25  Miloslav Trmač  <mitr@redhat.com>
+
+	* userhelper-wrap.c (userhelper_read_childout): Handle messages in
+	non-UTF-8 encodings that use more bytes in UTF-8.
+	(userhelper_runv): Disable character set conversion in childout_channel.
+diff --git a/userhelper-wrap.c b/userhelper-wrap.c
+--- a/userhelper-wrap.c
++++ b/userhelper-wrap.c
+@@ -881,7 +881,7 @@
+ 		return FALSE;
+ 	}
+ 	while ((condition & G_IO_IN) != 0) {
+-		char command, eol, buf[BUFSIZ], *end;
++		char command, eol, buf[BUFSIZ], *end, *converted;
+ 		unsigned long request_size;
+ 		gsize bytes_read;
+ 		GError *err;
+@@ -906,11 +906,15 @@
+ 					&err);
+ 		if (err != NULL || bytes_read != request_size)
+ 			_exit(1); /* Error of some kind. */
+-		buf[bytes_read] = '\0';
++		converted = g_locale_to_utf8(buf, request_size, &bytes_read,
++					     NULL, &err);
++		if (err != NULL || bytes_read != request_size)
++			_exit(1);
+ 		g_io_channel_read_chars(source, &eol, 1, &bytes_read, &err);
+ 		if (err != NULL || bytes_read != 1 || eol != '\n')
+ 			_exit(0); /* EOF, or error of some kind. */
+-		userhelper_handle_childout(command, buf);
++		userhelper_handle_childout(command, converted);
++		g_free(converted);
+ 		condition = g_io_channel_get_buffer_condition(source);
+ 	}
+ 	return TRUE;
+@@ -937,7 +941,6 @@
+ 	if (childpid > 0) {
+ 		GIOChannel *childout_channel;
+ 		GError *err;
+-		const char *charset;
+ 
+ 		/* We're the parent; close the write-end of the reading pipe,
+ 		 * and the read-end of the writing pipe. */
+@@ -952,13 +955,11 @@
+ 		   child. */
+ 		childout_channel = g_io_channel_unix_new(childout[0]);
+ 
+-		(void)g_get_charset(&charset);
+ 		err = NULL;
+-		g_io_channel_set_encoding(childout_channel, charset, &err);
++		g_io_channel_set_encoding(childout_channel, NULL, &err);
+ 		if (err != NULL) {
+-			fprintf(stderr, _("Can't set charset %s on an IO "
+-					  "channel: %s\n"),
+-				charset, err->message);
++			fprintf(stderr, _("Can't set binary encoding on an IO "
++					  "channel: %s\n"), err->message);
+ 			_exit(1);
+ 		}
+ 		g_io_channel_set_line_term(childout_channel, "\n", -1);

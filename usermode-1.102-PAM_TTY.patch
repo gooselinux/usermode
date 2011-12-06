@@ -1,0 +1,100 @@
+# HG changeset patch
+# User Miloslav Trmač <mitr@redhat.com>
+# Date 1265372688 -3600
+# Node ID 9a7b1e69d0a8213092caf45beb52c07a8d334ea3
+# Parent  8a897830e2d8745a72eb4236f02a981cfdc95528
+Set PAM_TTY if known.
+
+2010-02-05  Miloslav Trmač  <mitr@redhat.com>
+
+	* userhelper.c (set_pam_items): New function.
+	(passwd, chfn, wrap): Use pam_set_items.
+
+diff -r 8a897830e2d8 -r 9a7b1e69d0a8 ChangeLog
+--- a/ChangeLog	Thu Feb 04 23:00:17 2010 +0100
++++ b/ChangeLog	Fri Feb 05 13:24:48 2010 +0100
+@@ -1,3 +1,8 @@
++2010-02-05  Miloslav Trmač  <mitr@redhat.com>
++
++	* userhelper.c (set_pam_items): New function.
++	(passwd, chfn, wrap): Use pam_set_items.
++
+ 2010-02-04  Miloslav Trmač  <mitr@redhat.com>
+ 
+ 	* userhelper.c (become_super): Check for failures of the system
+diff -r 8a897830e2d8 -r 9a7b1e69d0a8 userhelper.c
+--- a/userhelper.c	Thu Feb 04 23:00:17 2010 +0100
++++ b/userhelper.c	Fri Feb 05 13:24:48 2010 +0100
+@@ -1102,6 +1102,31 @@
+ 	return NULL;
+ }
+ 
++/* Set various attributes of DATA, including the requesting user USER. */
++static void
++set_pam_items(struct app_data *data, const char *user)
++{
++	int retval;
++	char *tty;
++
++	retval = pam_set_item(data->pamh, PAM_RUSER, user);
++	if (retval != PAM_SUCCESS) {
++		debug_msg("userhelper: pam_set_item(PAM_RUSER) failed\n");
++		fail_exit(data, retval);
++	}
++
++	tty = ttyname(STDIN_FILENO);
++	if (tty != NULL) {
++		if (strncmp(tty, "/dev/", 5) == 0)
++			tty += 5;
++		retval = pam_set_item(data->pamh, PAM_TTY, tty);
++		if (retval != PAM_SUCCESS) {
++			debug_msg("userhelper: pam_set_item(PAM_TTY) failed\n");
++			fail_exit(data, retval);
++		}
++	}
++}
++
+ /* Change the user's password using the indicated conversation function and
+  * application data (which includes the ability to cancel if the user requests
+  * it.  For this task, we don't retry on failure. */
+@@ -1118,11 +1143,7 @@
+ 		fail_exit(conv->appdata_ptr, retval);
+ 	}
+ 
+-	retval = pam_set_item(data->pamh, PAM_RUSER, user);
+-	if (retval != PAM_SUCCESS) {
+-		debug_msg("userhelper: pam_set_item(PAM_RUSER) failed\n");
+-		fail_exit(conv->appdata_ptr, retval);
+-	}
++	set_pam_items(data, user);
+ 
+ 	debug_msg("userhelper: changing password for \"%s\"\n", user);
+ 	retval = pam_chauthtok(data->pamh, 0);
+@@ -1195,12 +1216,7 @@
+ 		fail_exit(conv->appdata_ptr, retval);
+ 	}
+ 
+-	/* Set the requesting user. */
+-	retval = pam_set_item(data->pamh, PAM_RUSER, user);
+-	if (retval != PAM_SUCCESS) {
+-		debug_msg("userhelper: pam_set_item(PAM_RUSER) failed\n");
+-		fail_exit(conv->appdata_ptr, retval);
+-	}
++	set_pam_items(data, user);
+ 
+ 	/* Try to authenticate the user. */
+ 	do {
+@@ -1742,12 +1758,7 @@
+ 		fail_exit(conv->appdata_ptr, retval);
+ 	}
+ 
+-	/* Set the requesting user. */
+-	retval = pam_set_item(data->pamh, PAM_RUSER, user);
+-	if (retval != PAM_SUCCESS) {
+-		debug_msg("userhelper: pam_set_item(PAM_RUSER) failed\n");
+-		fail_exit(conv->appdata_ptr, retval);
+-	}
++	set_pam_items(data, user);
+ 
+ 	/* Try to authenticate the user. */
+ 	do {
